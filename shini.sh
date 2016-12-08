@@ -16,9 +16,10 @@ shini_function_exists()
 shini_parse()
 {
 
-	RX_KEY='[a-zA-Z0-9_\-]'
-	RX_VALUE="[^;\"]"
-	RX_SECTION='[a-zA-Z0-9_\-]'
+	RX_ASCII_UNDERSCORE_DASH='[a-zA-Z0-9_\-]'
+	RX_ASCII_UNDERSCORE_DASH_SPACE='[ a-zA-Z0-9_\-]'
+	#RX_ASCII_DASH='([a-zA-Z0-9_\-]|\s)'
+	RX_SPECIAL="[^;\"]"
 	RX_WS='[ 	]'
 	RX_QUOTE='"'
 	RX_HEX='[0-9A-F]'
@@ -26,23 +27,23 @@ shini_parse()
 	EXTRA1=''
 	EXTRA2=''
 	EXTRA3=''
-	
+
 	if [ $# -ge 2 ] && [ ! -z "$2" ]; then
 	    POSTFIX="_$2"
 	fi
-	
+
 	if [ $# -ge 3 ] && ! [ -z "$3" ]; then
 	    EXTRA1="$3"
 	fi
-	
+
 	if [ $# -ge 4 ] && [ ! -z "$4" ]; then
 	    EXTRA2="$4"
 	fi
-	
+
 	if [ $# -ge 5 ] && [ ! -z "$5" ]; then
 	    EXTRA3="$5"
 	fi
-	
+
 	if ! shini_function_exists "__shini_parsed${POSTFIX}"; then
 		printf 'shini: __shini_parsed%s function not declared.\n' "${POSTFIX}" 1>&2
 		exit 255
@@ -73,31 +74,34 @@ shini_parse()
 	while read LINE || [ -n "$LINE" ]; do  # -n $LINE catches final line if not empty
 		# Check for new sections
 		if printf '%s' "$LINE" | \
-		  grep -qe "^${RX_WS}*\[${RX_SECTION}${RX_SECTION}*\]${RX_WS}*$"; then
+		  grep -qe "^${RX_WS}*\[${RX_ASCII_UNDERSCORE_DASH}${RX_ASCII_UNDERSCORE_DASH_SPACE}*\]${RX_WS}*$"; then
+		  #grep -qe "^${RX_WS}*\[${RX_SECTION}${RX_SECTION}*${RX_WS}${RX_SECTION}*\]${RX_WS}*$"; then
 			SECTION="$(printf '%s' "$LINE" | \
-				sed "s/^${RX_WS}*\[\(${RX_SECTION}${RX_SECTION}*\)\]${RX_WS}*$/\1/")"
-				
+				sed "s/^${RX_WS}*\[\(${RX_ASCII_UNDERSCORE_DASH}${RX_ASCII_UNDERSCORE_DASH_SPACE}*\)\]${RX_WS}*$/\1/")"
+			#printf 'shini: section match : `%s` at line `%s`\n' "$SECTION" "$LINE"
             if shini_function_exists "__shini_parsed_section${POSTFIX}"; then
 				"__shini_parsed_section${POSTFIX}" "$SECTION" "$EXTRA1" "$EXTRA2" "$EXTRA3"
 			fi
-			
+
 			continue
 		fi
-		
+
 		# Check for new values
 		if printf '%s' "$LINE" | \
-		  grep -qe "^${RX_WS}*${RX_KEY}${RX_KEY}*${RX_WS}*="; then
+		  grep -qe "^${RX_WS}*${RX_ASCII_UNDERSCORE_DASH}${RX_ASCII_UNDERSCORE_DASH_SPACE}*${RX_ASCII_UNDERSCORE_DASH}${RX_WS}*="; then
 			KEY="$(printf '%s' "$LINE" | \
-				sed "s/^${RX_WS}*\(${RX_KEY}${RX_KEY}*\)${RX_WS}*=.*$/\1/")"
+				sed "s/^${RX_WS}*\(${RX_ASCII_UNDERSCORE_DASH}${RX_ASCII_UNDERSCORE_DASH_SPACE}*${RX_ASCII_UNDERSCORE_DASH}\)${RX_WS}*=.*$/\1/")"
+				#sed "s/^[ 	]*\([a-zA-Z0-9_\-][a-zA-Z0-9_\-]*\)$[ 	]*=.*$/\1/")"
+				#sed "s/^[ 	]*([a-zA-Z0-9_\-][a-zA-Z0-9_\-]*)$[ 	]*=.*$/\1/")"
 			VALUE="$(printf '%s' "$LINE" | \
-				sed "s/^${RX_WS}*${RX_KEY}${RX_KEY}*${RX_WS}*=${RX_WS}*${RX_QUOTE}\{0,1\}\(${RX_VALUE}*\)${RX_QUOTE}\{0,1\}\(${RX_WS}*\;.*\)*$/\1/")"
-			
+				sed "s/^${RX_WS}*${RX_ASCII_UNDERSCORE_DASH}${RX_ASCII_UNDERSCORE_DASH_SPACE}*${RX_WS}*=${RX_WS}*${RX_QUOTE}\{0,1\}\(${RX_SPECIAL}*\)${RX_QUOTE}\{0,1\}\(${RX_WS}*\;.*\)*$/\1/")"
+
 			if printf '%s' "$VALUE" | grep -qe "^0x${RX_HEX}${RX_HEX}*$"; then
 				VALUE=$(printf '%d' "$VALUE")
 			fi
-			
+
 			"__shini_parsed${POSTFIX}" "$SECTION" "$KEY" "$VALUE" "$EXTRA1" "$EXTRA2" "$EXTRA3"
-						
+
 			if shini_function_exists "__shini_parsed_comment${POSTFIX}"; then
 			    if printf '%s' "$LINE" | grep -q ";"; then
         			COMMENT="$(printf '%s' "$LINE" | \
@@ -105,11 +109,14 @@ shini_parse()
         			 "__shini_parsed_comment${POSTFIX}" "$COMMENT" "$EXTRA1" "$EXTRA2" "$EXTRA3"
     	        fi
             fi
-            
+
 			continue
 		fi
-		
-		# Announce parse errors
+
+		# Announce parse errors (reach this section only if LINE has not matched SECTION, KEY or VALUE yet
+		# if line not empty
+		# while LINE is not a comment
+		# and LINE is not only tabs
 		if [ "$LINE" != '' ] &&
 		  ! printf '%s' "$LINE" | grep -qe "^${RX_WS}*;.*$" &&
 		  ! printf '%s' "$LINE" | grep -qe "^${RX_WS}*$"; then
@@ -119,7 +126,7 @@ shini_parse()
 				printf 'shini: Unable to parse line %d:\n  `%s`\n' $LINE_NUM "$LINE"
 			fi
 		fi
-		
+
 		LINE_NUM=$((LINE_NUM+1))
 	done < "$INI_FILE"
 
@@ -131,7 +138,7 @@ shini_parse()
 # @param value Value to add/update, do not specify to delete
 shini_write()
 {
-    # This is not yet optimised (early write support only) - 
+    # This is not yet optimised (early write support only) -
     # We actually re-parse the entire file, looking for the location in which to
     # write the new value, writing out everything we parse as-is meanwhile.
 
@@ -140,7 +147,7 @@ shini_write()
     #  __shini_no_file_passed__writer()
     #  __shini_file_unreadable__writer()
     #  __shini_parse_error__writer()
-    
+
     # Writer callbacks, used for writing the INI file content
     __shini_parsed_section__writer()
     {
@@ -153,15 +160,15 @@ shini_write()
             fi
         fi
         printf "\n[%s]" "$1" >> "$INI_FILE_TEMP"
-        
+
         LAST_SECTION="$1"
     }
-    
+
     __shini_parsed_comment__writer()
     {
         printf ";%s" "$1" >> "$INI_FILE_TEMP"
     }
-    
+
     __shini_parsed__writer()
     {
         if [ "$1" = "$WRITE_SECTION" ]; then
@@ -173,10 +180,10 @@ shini_write()
                 return
             fi
         fi
-        
+
         printf "\n%s=%s" "$2" "$3" >> "$INI_FILE_TEMP"
     }
-    
+
     if [ $# -lt 3 ]; then
         if shini_function_exists "__shini_no_file_passed"; then
             __shini_no_file_passed
@@ -185,16 +192,16 @@ shini_write()
             exit 254
         fi
     fi
-    
+
     INI_FILE="$1"
-    INI_FILE_TEMP="$(mktemp -t shini_XXXXXX)"       
-    
+    INI_FILE_TEMP="$(mktemp -t shini_XXXXXX)"
+
     WRITE_SECTION="$2"
     WRITE_KEY="$3"
     WRITE_VALUE="$4"
     LAST_SECTION=""
     VALUE_WRITTEN=0
-    
+
     shini_parse "$1" "_writer" "$2" "$3" "$4"
     # Still not written out yet
     if [ $VALUE_WRITTEN -eq 0 ]; then
@@ -205,6 +212,6 @@ shini_write()
         # Write value at end of file
         printf "\n%s=%s" "$WRITE_KEY" "$WRITE_VALUE" >> "$INI_FILE_TEMP"
     fi
-    
+
     mv "$INI_FILE_TEMP" "$INI_FILE"
 }
